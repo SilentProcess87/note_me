@@ -1,0 +1,17 @@
+app:
+  startup_with_windows: false
+  storage_path: C:\Users\OrenMaozSharabi\NoteMe
+audio:
+  chunk_duration_sec: 3.0
+  default_source: both
+  mic_device_index: 6
+  system_device_index: 63
+llm:
+  base_url: http://localhost:11434
+  model: qwen2.5-coder:7b
+  timeout_sec: 120
+transcription:
+  compute_type: int8
+  default_language: auto
+  device: cpu
+  model: large-v3

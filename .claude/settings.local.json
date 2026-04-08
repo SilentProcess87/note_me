@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /d/development/note_me log --oneline)",
+      "Bash(ls -la /d/development/note_me/.cursor*)",
+      "Bash(taskkill //F //IM NoteMe.exe)"
+    ]
+  }
+}

@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+*.egg
+*.whl
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# PyInstaller build output
+build/
+dist/
+
+# Whisper model files (large, downloaded at runtime)
+.model_test/
+*.bin
+*.onnx
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Database (user data, generated at runtime)
+*.db
+
+# User config (generated at runtime, contains device-specific indices)
+# The bundled config.yaml IS tracked as the default template
+!config.yaml
