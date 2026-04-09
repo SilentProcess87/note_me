@@ -77,7 +77,7 @@ class ZoomWatcher(QThread):
     meeting_started = pyqtSignal()   # Zoom meeting just began
     meeting_ended   = pyqtSignal()   # Zoom meeting just ended
 
-    def __init__(self, poll_sec: float = 3.0, parent=None) -> None:
+    def __init__(self, poll_sec: float = 5.0, parent=None) -> None:
         super().__init__(parent)
         self._poll_sec = poll_sec
         self._stop_flag = False

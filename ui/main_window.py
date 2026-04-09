@@ -176,7 +176,6 @@ class MainWindow(QMainWindow):
         self._config = config
         self._active_session = None
         self._whisper_model = None
-        self._whisper_model_hebrew = None   # Dedicated Hebrew model (loaded on demand)
         # Track the device/compute_type/model actually used after any fallback.
         # These may differ from config if CUDA DLLs were missing at load time.
         self._loaded_device: str = config.transcription.device
@@ -186,7 +185,6 @@ class MainWindow(QMainWindow):
         self._grammar_service = None
         self._qa_service = None
         self._model_loader: Optional[_ModelLoader] = None
-        self._hebrew_loader: Optional[_ModelLoader] = None
         # Zoom auto-record
         self._zoom_watcher = None   # ZoomWatcher | None
         self._zoom_started_recording: bool = False  # True if watcher auto-started recording
@@ -265,9 +263,13 @@ class MainWindow(QMainWindow):
         self._grammar_service = GrammarService(self._ollama_client, cfg.model)
         self._qa_service = QAService(self._ollama_client, cfg.model)
 
-        # Load Whisper model in background
+        # Load Whisper model in background.
+        # If language is Hebrew, load the Hebrew model directly; otherwise turbo.
+        initial_model = self._config.transcription.model
+        if self._config.transcription.default_language == "he":
+            initial_model = "hebrew"
         self._model_loader = _ModelLoader(
-            self._config.transcription.model,
+            initial_model,
             self._config.transcription.device,
             self._config.transcription.compute_type,
             self._config.app.resolved_storage_path,
@@ -281,28 +283,6 @@ class MainWindow(QMainWindow):
         self._init_zoom_watcher()
         # Hebrew model is loaded after the main model finishes (see _on_model_ready)
         # to avoid concurrent snapshot_download calls that crash tqdm.
-
-    def _load_hebrew_model(self) -> None:
-        """Load the Hebrew-specialized Whisper model in background."""
-        if self._whisper_model_hebrew is not None or self._hebrew_loader is not None:
-            return
-        self._hebrew_loader = _ModelLoader(
-            "hebrew",
-            self._config.transcription.device,
-            self._config.transcription.compute_type,
-            self._config.app.resolved_storage_path,
-            parent=self,
-        )
-        self._hebrew_loader.model_ready.connect(self._on_hebrew_model_ready)
-        self._hebrew_loader.error.connect(
-            lambda e: log.warning("Hebrew model failed to load: %s", e)
-        )
-        self._hebrew_loader.start()
-
-    @pyqtSlot(object, str, str)
-    def _on_hebrew_model_ready(self, model, model_name: str, device_used: str) -> None:
-        self._whisper_model_hebrew = model
-        log.info("Hebrew Whisper model loaded (%s/%s)", device_used, model_name)
 
     def _init_zoom_watcher(self) -> None:
         """Start or stop the ZoomWatcher based on current config."""
@@ -398,12 +378,6 @@ class MainWindow(QMainWindow):
             device_label = "GPU" if device_used == "cuda" else "CPU"
             self._status_bar.showMessage(f"NoteMe ready  [{device_label}]", 5000)
 
-        # Now that the main model is loaded, start the Hebrew model if needed.
-        # Must be sequential to avoid concurrent tqdm/snapshot_download crashes.
-        lang = self._config.transcription.default_language
-        if lang in ("he", "auto"):
-            self._load_hebrew_model()
-
     @pyqtSlot(str)
     def _on_model_error(self, error: str) -> None:
         self._status_bar.showMessage(f"Model error: {error}")
@@ -447,14 +421,10 @@ class MainWindow(QMainWindow):
                 5000,
             )
 
-        # Use the Hebrew-specialized model when language is Hebrew
-        if language == "he" and self._whisper_model_hebrew is not None:
-            preloaded = self._whisper_model_hebrew
-            log.info("Using Hebrew-specialized Whisper model.")
-        elif live_model == self._loaded_model_name:
-            preloaded = self._whisper_model
-        else:
-            preloaded = None
+        # Use the loaded model directly. If language changed since startup
+        # (e.g. Hebrew was selected but turbo was loaded), the TranscriptionWorker
+        # will load the right model on demand.
+        preloaded = self._whisper_model if live_model == self._loaded_model_name else None
 
         self._active_session = MeetingSession(
             source=source,

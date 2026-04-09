@@ -122,7 +122,7 @@ class MeetingSession(QObject):
         # QTimer polls capture levels from the Qt thread so we don't emit
         # signals from the raw Python mixer thread.
         self._level_timer = QTimer(self)
-        self._level_timer.setInterval(80)   # ~12 Hz
+        self._level_timer.setInterval(250)   # ~4 Hz (was 12 Hz — much less CPU)
         self._level_timer.timeout.connect(self._poll_levels)
 
     # ------------------------------------------------------------------ #

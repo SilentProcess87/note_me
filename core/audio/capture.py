@@ -224,16 +224,20 @@ class AudioCaptureManager:
     # ------------------------------------------------------------------ #
 
     def _drain(self, q: queue.Queue, buf: list, sr: int) -> float:
-        """Drain a device queue into the accumulation buffer. Returns peak RMS."""
-        peak_rms = 0.0
+        """Drain a device queue, batch-concatenate, resample once. Returns peak RMS."""
+        raw_chunks: list[np.ndarray] = []
         while not q.empty():
             try:
-                chunk = q.get_nowait()
-                if len(chunk):
-                    peak_rms = max(peak_rms, float(np.sqrt(np.mean(chunk ** 2))))
-                buf.append(resample_to_16k(chunk, sr))
+                raw_chunks.append(q.get_nowait())
             except queue.Empty:
                 break
+        if not raw_chunks:
+            return 0.0
+        # Concatenate all raw chunks and resample in one call (much cheaper
+        # than resampling each tiny 1024-sample callback chunk individually).
+        combined = np.concatenate(raw_chunks)
+        peak_rms = float(np.sqrt(np.mean(combined ** 2))) if len(combined) else 0.0
+        buf.append(resample_to_16k(combined, sr))
         return peak_rms
 
     def _mixer_loop(self) -> None:
@@ -241,7 +245,7 @@ class AudioCaptureManager:
         use_mic = self._source in ("mic", "both")
 
         while self._running:
-            time.sleep(0.1)
+            time.sleep(0.2)  # 200ms poll (was 100ms — halves CPU wake-ups)
 
             if use_sys:
                 sys_rms = self._drain(self._sys_queue, self._sys_buf, self._sys_sr)
