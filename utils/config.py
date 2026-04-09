@@ -35,6 +35,8 @@ class TranscriptionConfig(BaseModel):
     compute_type: str = "int8"
     device: str = "cpu"
     default_language: str = "auto"  # auto | en | he
+    enable_diarization: bool = False   # speaker separation (requires pyannote + HF token)
+    hf_token_encrypted: str = ""       # DPAPI-encrypted HuggingFace token for pyannote
     vocabulary_hint: str = (
         "Kubernetes, pods, deployment, namespace, cluster, Docker, container, "
         "CI/CD, pipeline, DevOps, microservices, API, endpoint, load balancer, "

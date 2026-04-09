@@ -238,6 +238,11 @@ class MainWindow(QMainWindow):
     # Service initialisation
     # ------------------------------------------------------------------ #
 
+    def _decrypt_hf_token(self) -> str:
+        """Decrypt the HuggingFace token for pyannote diarization."""
+        from utils.secrets import decrypt_key
+        return decrypt_key(self._config.transcription.hf_token_encrypted)
+
     def _init_services(self) -> None:
         self._init_llm_client()
         self._record_tab.set_qa_service(self._qa_service)
@@ -465,6 +470,8 @@ class MainWindow(QMainWindow):
             ollama_model=self._config.llm.model,
             storage_path=str(self._config.app.resolved_storage_path),
             vocabulary_hint=self._config.transcription.vocabulary_hint,
+            enable_diarization=self._config.transcription.enable_diarization,
+            hf_token=self._decrypt_hf_token(),
         )
         self._active_session.segment_ready.connect(self._on_segment)
         self._active_session.summary_ready.connect(self._on_summary)

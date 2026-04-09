@@ -76,6 +76,8 @@ class MeetingSession(QObject):
         ollama_model: str = "mistral",
         storage_path: Optional[str] = None,
         vocabulary_hint: str = "",
+        enable_diarization: bool = False,
+        hf_token: str = "",
         parent=None,
     ):
         super().__init__(parent)
@@ -87,6 +89,8 @@ class MeetingSession(QObject):
         self._is_recording = False
         self._storage_path = storage_path
         self._wav_path: Optional[str] = None
+        self._enable_diarization = enable_diarization
+        self._hf_token = hf_token
 
         # Audio capture (save path set in start() after session ID is known)
         self._capture_kwargs = dict(
@@ -174,6 +178,11 @@ class MeetingSession(QObject):
         self._capture.stop()
         self._worker.stop_processing()
         self._worker.wait(15_000)  # wait up to 15 s for remaining transcription
+
+        # Run speaker diarization on the WAV before compressing
+        # (needs the uncompressed audio for best quality)
+        if self._enable_diarization and self._wav_path:
+            self._run_diarization()
 
         # Compress WAV → OGG (much smaller) in the background
         ogg_path = self._compress_audio()
@@ -288,6 +297,32 @@ class MeetingSession(QObject):
     # Helpers
     # ------------------------------------------------------------------ #
 
+    def _run_diarization(self) -> None:
+        """Run speaker diarization and update segment labels in DB."""
+        try:
+            from .diarization import diarize, assign_speakers_to_segments
+            turns = diarize(self._wav_path, hf_token=self._hf_token)
+            if turns:
+                assign_speakers_to_segments(self._segments, turns)
+                # Update speaker labels in DB
+                if self._db_session_id:
+                    db = get_db()
+                    try:
+                        from .storage.models import TranscriptSegment as TSeg
+                        for seg in self._segments:
+                            db_seg = db.query(TSeg).filter(
+                                TSeg.session_id == self._db_session_id,
+                                TSeg.start_sec == seg.start_sec,
+                            ).first()
+                            if db_seg:
+                                db_seg.speaker = seg.speaker
+                        db.commit()
+                        log.info("Updated %d segments with diarization labels.", len(self._segments))
+                    finally:
+                        db.close()
+        except Exception as exc:
+            log.warning("Diarization failed: %s", exc)
+
     def _compress_audio(self) -> Optional[str]:
         """Compress WAV to OGG/Vorbis in chunks to avoid memory issues. Returns OGG path or None."""
         if not self._wav_path or not os.path.isfile(self._wav_path):
@@ -316,11 +351,16 @@ class MeetingSession(QObject):
             return None
 
     def _build_transcript(self) -> str:
-        speaker_labels = {"you": "\U0001f3a4 You", "others": "\U0001f50a Others", "both": "\U0001f5e3 Crosstalk"}
+        energy_labels = {
+            "you": "\U0001f3a4 You",
+            "others": "\U0001f50a Others",
+            "both": "\U0001f5e3 Crosstalk",
+        }
         lines = []
         for seg in self._segments:
             m, s = divmod(int(seg.start_sec), 60)
-            spk = speaker_labels.get(seg.speaker, "")
+            # Diarization labels like "Speaker 1" or "you (Speaker 2)" pass through as-is
+            spk = energy_labels.get(seg.speaker, seg.speaker if seg.speaker else "")
             prefix = f"[{m:02d}:{s:02d}]"
             if spk:
                 prefix += f" {spk}:"

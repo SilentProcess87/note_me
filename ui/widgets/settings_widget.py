@@ -256,6 +256,24 @@ class SettingsWidget(QWidget):
         vocab_hint_lbl.setStyleSheet("color:#888; font-size:10px;")
         vocab_hint_lbl.setWordWrap(True)
         trans_form.addRow("", vocab_hint_lbl)
+
+        self._diarize_check = QCheckBox("Enable speaker diarization (identify Speaker 1, 2, 3...)")
+        trans_form.addRow("", self._diarize_check)
+
+        self._hf_token_edit = QLineEdit()
+        self._hf_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._hf_token_edit.setPlaceholderText("hf_...")
+        trans_form.addRow("HuggingFace Token:", self._hf_token_edit)
+
+        diar_hint = QLabel(
+            "Speaker diarization identifies who said what. Requires:\n"
+            "1. pip install pyannote.audio\n"
+            "2. Accept terms at huggingface.co/pyannote/speaker-diarization-3.1\n"
+            "3. Create a token at huggingface.co/settings/tokens"
+        )
+        diar_hint.setStyleSheet("color:#888; font-size:10px;")
+        diar_hint.setWordWrap(True)
+        trans_form.addRow("", diar_hint)
         root.addWidget(trans_grp)
 
         llm_grp = QGroupBox("LLM  (Summarization & Q&A)")
@@ -388,6 +406,9 @@ class SettingsWidget(QWidget):
 
         self._src_combo.setCurrentIndex(_SOURCE_IDX.get(cfg.audio.default_source, 0))
         self._vocab_edit.setText(cfg.transcription.vocabulary_hint)
+        self._diarize_check.setChecked(cfg.transcription.enable_diarization)
+        from utils.secrets import decrypt_key as _dk
+        self._hf_token_edit.setText(_dk(cfg.transcription.hf_token_encrypted))
 
     def populate_devices(self, loopback_devices: list[dict], mic_devices: list[dict]) -> None:
         cfg = self._config
@@ -414,6 +435,14 @@ class SettingsWidget(QWidget):
         path = QFileDialog.getExistingDirectory(self, "Select Storage Folder", self._path_edit.text())
         if path:
             self._path_edit.setText(path)
+
+    def _encrypt_hf_token(self) -> str:
+        """Encrypt the HuggingFace token using DPAPI."""
+        raw = self._hf_token_edit.text().strip()
+        if not raw:
+            return ""
+        from utils.secrets import encrypt_key
+        return encrypt_key(raw)
 
     def _encrypt_api_key(self) -> str:
         """Encrypt the API key from the input field using DPAPI."""
@@ -534,6 +563,8 @@ class SettingsWidget(QWidget):
                 "device": self._device_combo.currentText(),
                 "default_language": self._lang_combo.currentData(),
                 "vocabulary_hint": self._vocab_edit.text(),
+                "enable_diarization": self._diarize_check.isChecked(),
+                "hf_token_encrypted": self._encrypt_hf_token(),
             },
             "llm": {
                 "provider": self._provider_combo.currentData() or "ollama",
