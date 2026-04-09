@@ -93,8 +93,9 @@ def main() -> None:
     # Fix for tqdm in environments where sys.stdout/stderr might be None
     import tqdm
     try:
-        tqdm.tqdm._lock = None
-    except AttributeError:
+        # Ensure the lock is initialized in the main thread
+        tqdm.tqdm.get_lock()
+    except Exception:
         pass
 
     # ── Bootstrap ────────────────────────────────────────────────────

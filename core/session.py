@@ -213,6 +213,8 @@ class MeetingSession(QObject):
         self._level_timer.stop()
         if not (self._ollama_client and self._segments):
             log.info("No segments or Ollama client — skipping summarization.")
+            # Emit empty summary so MainWindow can release the session
+            self.summary_ready.emit("", "")
             return
         log.info("Starting summarization for session %d (%d segments).",
                  self._db_session_id, len(self._segments))
@@ -220,9 +222,7 @@ class MeetingSession(QObject):
         summarizer = Summarizer(self._ollama_client, self._ollama_model)
         self._summary_worker = SummaryWorker(transcript, summarizer, self._language, self)
         self._summary_worker.summary_ready.connect(self._on_summary_ready)
-        self._summary_worker.error.connect(
-            lambda e: log.error("Summarization error: %s", e)
-        )
+        self._summary_worker.error.connect(self._on_summary_error)
         self._summary_worker.start()
 
     def _poll_levels(self) -> None:
@@ -253,6 +253,11 @@ class MeetingSession(QObject):
             finally:
                 db.close()
         self.segment_ready.emit(segment)
+
+    def _on_summary_error(self, error: str) -> None:
+        log.error("Summarization error: %s", error)
+        # Still emit so MainWindow releases the session
+        self.summary_ready.emit("", "")
 
     @pyqtSlot(str, str, str)
     def _on_summary_ready(self, summary: str, action_items: str, llm_title: str) -> None:

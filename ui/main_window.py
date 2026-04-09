@@ -410,8 +410,11 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(str, str)
     def _start_recording(self, source: str, language: str) -> None:
+        if self._active_session and self._active_session._is_recording:
+            return  # actually recording right now
+        # If the previous session is just summarizing (not recording), release it
         if self._active_session:
-            return
+            self._active_session = None
         if self._whisper_model is None:
             QMessageBox.information(
                 self, "NoteMe",
@@ -490,13 +493,22 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(str, str)
     def _on_summary(self, summary: str, action_items: str) -> None:
-        self._record_tab.set_status("Summary ready! ✓")
-        self._status_bar.showMessage("Summary generated.", 5000)
+        if summary:
+            self._record_tab.set_status("Summary ready! ✓")
+            self._status_bar.showMessage("Summary generated.", 5000)
+        else:
+            self._record_tab.set_status("Recording saved.")
+            self._status_bar.showMessage("Recording saved (no summary generated).", 5000)
+        # Now safe to release the session — the summary thread has finished.
+        self._active_session = None
         self._load_meetings()
 
     @pyqtSlot(int)
     def _on_recording_stopped(self, session_id: int) -> None:
-        self._active_session = None
+        # Do NOT set self._active_session = None here!
+        # The SummaryWorker is still running inside the session.
+        # Setting it to None would GC the session and kill the summary thread.
+        # The session is released in _on_summary() after summarization completes.
         self._load_meetings()
 
     @pyqtSlot(str)
