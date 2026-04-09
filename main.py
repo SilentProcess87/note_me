@@ -86,7 +86,15 @@ def _make_icon(size: int = 64) -> QIcon:
 
 
 def main() -> None:
-# ── CUDA DLL bootstrap (must run before faster_whisper is imported) ──
+    # ── Lower process priority so NoteMe doesn't starve other apps ──
+    if sys.platform == "win32":
+        import ctypes
+        BELOW_NORMAL = 0x00004000
+        ctypes.windll.kernel32.SetPriorityClass(
+            ctypes.windll.kernel32.GetCurrentProcess(), BELOW_NORMAL
+        )
+
+    # ── CUDA DLL bootstrap (must run before faster_whisper is imported) ──
     from utils.cuda_setup import bootstrap as _cuda_bootstrap
     _cuda_bootstrap()
 

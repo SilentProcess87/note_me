@@ -665,9 +665,24 @@ class MainWindow(QMainWindow):
             log.warning("Could not update startup entry: %s", exc)
 
     # ------------------------------------------------------------------ #
-    # Close → hide to tray
+    # Close → hide to tray (pause non-essential timers)
     # ------------------------------------------------------------------ #
 
     def closeEvent(self, event: QCloseEvent) -> None:
         event.ignore()
         self.hide()
+        # Pause the Zoom status polling in Settings when window is hidden
+        # (the ZoomWatcher thread still runs for auto-record).
+        try:
+            self._settings_tab._zoom_poll.stop()
+        except Exception:
+            pass
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        # Resume the Zoom status polling when window is shown again
+        try:
+            if self._config.app.zoom_auto_record:
+                self._settings_tab._zoom_poll.start()
+        except Exception:
+            pass

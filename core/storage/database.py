@@ -5,6 +5,7 @@ from typing import Optional
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session as DbSession, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from .models import Base
 
@@ -29,7 +30,12 @@ def init_db(storage_path: Path) -> None:
     global _engine, _SessionLocal
     storage_path.mkdir(parents=True, exist_ok=True)
     db_path = storage_path / "noteme.db"
-    _engine = create_engine(f"sqlite:///{db_path}", echo=False, connect_args={"check_same_thread": False})
+    _engine = create_engine(
+        f"sqlite:///{db_path}",
+        echo=False,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,  # reuse a single connection (much faster for SQLite)
+    )
     Base.metadata.create_all(_engine)
     _migrate(_engine)
     _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False)
