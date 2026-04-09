@@ -229,9 +229,9 @@ class MeetingSession(QObject):
         """Emit current audio levels from the Qt thread (safe for UI connections)."""
         self.levels_updated.emit(self._capture.mic_rms, self._capture.sys_rms)
 
-    def _on_audio_ready(self, audio: np.ndarray) -> None:
+    def _on_audio_ready(self, audio: np.ndarray, speaker: str = "") -> None:
         if self._worker.isRunning():
-            self._worker.enqueue(audio)
+            self._worker.enqueue(audio, speaker)
 
     @pyqtSlot(object)
     def _on_segment(self, segment: Segment) -> None:
@@ -246,6 +246,7 @@ class MeetingSession(QObject):
                     text=segment.text,
                     language=segment.language,
                     confidence=segment.confidence,
+                    speaker=segment.speaker,
                 ))
                 db.commit()
             except Exception as exc:
@@ -315,8 +316,13 @@ class MeetingSession(QObject):
             return None
 
     def _build_transcript(self) -> str:
+        speaker_labels = {"you": "\U0001f3a4 You", "others": "\U0001f50a Others", "both": "\U0001f5e3 Crosstalk"}
         lines = []
         for seg in self._segments:
             m, s = divmod(int(seg.start_sec), 60)
-            lines.append(f"[{m:02d}:{s:02d}] {seg.text}")
+            spk = speaker_labels.get(seg.speaker, "")
+            prefix = f"[{m:02d}:{s:02d}]"
+            if spk:
+                prefix += f" {spk}:"
+            lines.append(f"{prefix} {seg.text}")
         return "\n".join(lines)

@@ -49,6 +49,7 @@ class TranscriptSegment(Base):
     text = Column(Text, nullable=False)
     language = Column(String(10), nullable=True)
     confidence = Column(Float, nullable=True)
+    speaker = Column(String(20), nullable=True, default="")  # "you" | "others" | "both" | ""
 
     session = relationship("Session", back_populates="segments")
 

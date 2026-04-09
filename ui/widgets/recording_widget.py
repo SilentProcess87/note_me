@@ -235,10 +235,17 @@ class RecordingWidget(QWidget):
         self._mic_bar.setValue(min(100, int(mic_rms * 600)))
         self._sys_bar.setValue(min(100, int(sys_rms * 600)))
 
-    def append_segment(self, start_sec: float, text: str) -> None:
+    def append_segment(self, start_sec: float, text: str, speaker: str = "") -> None:
         m, s = divmod(int(start_sec), 60)
+        spk = ""
+        if speaker == "you":
+            spk = '<span style="color:#8e44ad;">\U0001f3a4 You:</span> '
+        elif speaker == "others":
+            spk = '<span style="color:#2980b9;">\U0001f50a Others:</span> '
+        elif speaker == "both":
+            spk = '<span style="color:#e67e22;">\U0001f5e3 Crosstalk:</span> '
         self._transcript.append(
-            f'<span style="color:#888;">[{m:02d}:{s:02d}]</span> {text}'
+            f'<span style="color:#888;">[{m:02d}:{s:02d}]</span> {spk}{text}'
         )
         cursor = self._transcript.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)

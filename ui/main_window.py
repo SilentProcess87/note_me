@@ -489,7 +489,7 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(object)
     def _on_segment(self, segment) -> None:
-        self._record_tab.append_segment(segment.start_sec, segment.text)
+        self._record_tab.append_segment(segment.start_sec, segment.text, segment.speaker)
 
     @pyqtSlot(str, str)
     def _on_summary(self, summary: str, action_items: str) -> None:
@@ -533,10 +533,15 @@ class MainWindow(QMainWindow):
             if not rec:
                 return
 
+            _spk_labels = {"you": "\U0001f3a4 You", "others": "\U0001f50a Others", "both": "\U0001f5e3 Crosstalk"}
             lines = []
             for seg in rec.segments:
                 m, s = divmod(int(seg.start_sec), 60)
-                lines.append(f"[{m:02d}:{s:02d}] {seg.text}")
+                spk = _spk_labels.get(getattr(seg, "speaker", "") or "", "")
+                prefix = f"[{m:02d}:{s:02d}]"
+                if spk:
+                    prefix += f" {spk}:"
+                lines.append(f"{prefix} {seg.text}")
             transcript = "\n".join(lines)
 
             summary_text = ""

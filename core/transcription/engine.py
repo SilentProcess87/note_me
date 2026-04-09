@@ -20,6 +20,7 @@ class Segment:
     text: str
     language: str
     confidence: float
+    speaker: str = ""  # "you" | "others" | "" (unknown/single source)
 
 
 class TranscriptionWorker(QThread):
@@ -65,9 +66,9 @@ class TranscriptionWorker(QThread):
     # Public API
     # ------------------------------------------------------------------ #
 
-    def enqueue(self, audio: np.ndarray) -> None:
+    def enqueue(self, audio: np.ndarray, speaker: str = "") -> None:
         """Add a 16 kHz float32 mono buffer to the processing queue."""
-        self._queue.put(audio)
+        self._queue.put((audio, speaker))
         self.chunk_queued.emit(self._queue.qsize())
 
     def stop_processing(self) -> None:
@@ -89,12 +90,13 @@ class TranscriptionWorker(QThread):
 
         self._chunks_processed = 0
         while True:
-            audio = self._queue.get()
-            if audio is None:
+            item = self._queue.get()
+            if item is None:
                 break
-            remaining = self._queue.qsize() + 1  # +1 for current chunk
+            audio, speaker = item
+            remaining = self._queue.qsize() + 1
             self.chunk_processing.emit(remaining)
-            self._transcribe(audio)
+            self._transcribe(audio, speaker)
             self._chunks_processed += 1
             self.chunk_done.emit(self._chunks_processed, self._queue.qsize())
 
@@ -121,7 +123,7 @@ class TranscriptionWorker(QThread):
             self.error.emit(msg)
             return False
 
-    def _transcribe(self, audio: np.ndarray) -> None:
+    def _transcribe(self, audio: np.ndarray, speaker: str = "") -> None:
         if self._model is None:
             return
         chunk_duration = len(audio) / TARGET_SR
@@ -166,6 +168,7 @@ class TranscriptionWorker(QThread):
                     text=text,
                     language=getattr(info, "language", self._language or "und"),
                     confidence=getattr(seg, "avg_logprob", 0.0),
+                    speaker=speaker,
                 )
                 self.segment_ready.emit(s)
             if chunk_texts:

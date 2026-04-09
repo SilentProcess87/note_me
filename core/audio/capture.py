@@ -25,7 +25,7 @@ class AudioCaptureManager:
 
     def __init__(
         self,
-        on_audio_ready: Callable[[np.ndarray], None],
+        on_audio_ready: Callable,  # (audio, speaker) or (audio,)
         on_levels: Optional[Callable[[float, float], None]] = None,
         source: str = "both",
         system_device_index: int = -1,
@@ -276,8 +276,9 @@ class AudioCaptureManager:
             mixed = self._mix(sys_audio, mic_audio)
             if mixed is not None and len(mixed) > 0:
                 self._write_wav(mixed)
+                speaker = self._detect_speaker(sys_audio, mic_audio)
                 try:
-                    self._callback(mixed)
+                    self._callback(mixed, speaker)
                 except Exception as exc:
                     log.error("Audio callback error: %s", exc)
 
@@ -293,10 +294,36 @@ class AudioCaptureManager:
         mixed = self._mix(sys_audio, mic_audio)
         if mixed is not None and len(mixed) > 0:
             self._write_wav(mixed)
+            speaker = self._detect_speaker(sys_audio, mic_audio)
             try:
-                self._callback(mixed)
+                self._callback(mixed, speaker)
             except Exception as exc:
                 log.error("Flush callback error: %s", exc)
+
+    @staticmethod
+    def _detect_speaker(
+        sys_audio: Optional[np.ndarray],
+        mic_audio: Optional[np.ndarray],
+    ) -> str:
+        """Determine whether the chunk is dominated by mic (you) or system (others)."""
+        if sys_audio is None and mic_audio is None:
+            return ""
+        if sys_audio is None:
+            return "you"
+        if mic_audio is None:
+            return "others"
+
+        mic_energy = float(np.sqrt(np.mean(mic_audio ** 2))) if len(mic_audio) else 0.0
+        sys_energy = float(np.sqrt(np.mean(sys_audio ** 2))) if len(sys_audio) else 0.0
+        silence = 0.005
+
+        if mic_energy < silence and sys_energy < silence:
+            return ""  # both silent
+        if mic_energy > sys_energy * 1.5:
+            return "you"
+        if sys_energy > mic_energy * 1.5:
+            return "others"
+        return "both"  # both speaking (crosstalk)
 
     def _write_wav(self, audio: np.ndarray) -> None:
         """Write a float32 audio chunk to the WAV file as 16-bit PCM."""
