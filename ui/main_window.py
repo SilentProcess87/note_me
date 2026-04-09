@@ -558,7 +558,13 @@ class MainWindow(QMainWindow):
         finally:
             db.close()
 
-        dlg = MeetingDetailDialog(session_data=data, qa_service=self._qa_service, parent=self)
+        dlg = MeetingDetailDialog(
+            session_data=data,
+            qa_service=self._qa_service,
+            llm_client=self._ollama_client,
+            llm_model=self._config.llm.model,
+            parent=self,
+        )
         dlg.exec()
 
     # ------------------------------------------------------------------ #

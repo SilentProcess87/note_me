@@ -46,15 +46,60 @@ class _QAWorker(QThread):
             self.error.emit(str(exc))
 
 
+class _SummaryGenWorker(QThread):
+    """Run summarization from the meeting detail dialog (on-demand)."""
+    done = pyqtSignal(str, str)  # summary_text, action_items
+    error = pyqtSignal(str)
+
+    def __init__(self, transcript: str, language: str, llm_client, llm_model: str, session_id: int, parent=None):
+        super().__init__(parent)
+        self._transcript = transcript
+        self._language = language
+        self._client = llm_client
+        self._model = llm_model
+        self._session_id = session_id
+
+    def run(self) -> None:
+        try:
+            from core.llm.summarizer import Summarizer
+            s = Summarizer(self._client, self._model)
+            result = s.summarize(self._transcript, self._language)
+            # Save to DB
+            from core.storage.database import get_db
+            from core.storage.models import Summary, Session as DbSession
+            db = get_db()
+            try:
+                db.add(Summary(
+                    session_id=self._session_id,
+                    summary_text=result.summary,
+                    action_items=result.action_items,
+                    ollama_model=self._model,
+                ))
+                if result.title:
+                    rec = db.get(DbSession, self._session_id)
+                    if rec:
+                        date_str = rec.start_time.strftime("%Y-%m-%d %H:%M") if rec.start_time else ""
+                        rec.title = f"{result.title}  ({date_str})" if date_str else result.title
+                db.commit()
+            finally:
+                db.close()
+            self.done.emit(result.summary, result.action_items)
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
 class MeetingDetailDialog(QDialog):
-    def __init__(self, session_data: dict, qa_service=None, parent=None):
+    def __init__(self, session_data: dict, qa_service=None, llm_client=None, llm_model: str = "", parent=None):
         super().__init__(parent)
         self._session = session_data
         self._session_id: int = session_data.get("id", -1)
         self._qa_service = qa_service
+        self._llm_client = llm_client
+        self._llm_model = llm_model
         self._transcript = session_data.get("transcript", "")
         self._language = session_data.get("language", "auto")
         self._qa_workers: list[_QAWorker] = []
+        self._summary_gen_worker = None
         self._summary_loaded = bool(session_data.get("summary"))
         self._poll_ticks = 0
         self._poll_timer = QTimer(self)
@@ -221,7 +266,21 @@ class MeetingDetailDialog(QDialog):
         tg.addWidget(self._task_edit)
         sw_layout.addWidget(task_grp)
 
-        # Copy full report button
+        # Action buttons row
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        # Generate / Re-generate summary button
+        self._gen_btn = QPushButton("🔄  Generate Summary")
+        self._gen_btn.setFixedHeight(32)
+        self._gen_btn.setStyleSheet(
+            "QPushButton{background:#e67e22;color:white;border-radius:5px;padding:4px 16px;}"
+            "QPushButton:hover{background:#d35400;}"
+        )
+        self._gen_btn.clicked.connect(self._generate_summary)
+        self._gen_btn.setVisible(not self._summary_loaded)  # show only when no summary
+        btn_row.addWidget(self._gen_btn)
+
         copy_all_btn = QPushButton("📋  Copy Full Report")
         copy_all_btn.setFixedHeight(32)
         copy_all_btn.setStyleSheet(
@@ -229,8 +288,6 @@ class MeetingDetailDialog(QDialog):
             "QPushButton:hover{background:#7d3c98;}"
         )
         copy_all_btn.clicked.connect(self._copy_full_report)
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
         btn_row.addWidget(copy_all_btn)
         sw_layout.addLayout(btn_row)
 
@@ -276,8 +333,15 @@ class MeetingDetailDialog(QDialog):
     def _poll_db(self) -> None:
         """Called every 2.5 s while summary is pending. Reads from DB and updates UI."""
         self._poll_ticks += 1
-        if self._poll_ticks > 40:  # ~100 s max
+        if self._poll_ticks > 12:  # ~30 s — if no summary yet, stop polling and show the button
             self._poll_timer.stop()
+            self._sum_edit.setPlainText(
+                "No summary was generated for this meeting.\n"
+                "Click \"\U0001f504 Generate Summary\" to create one now."
+            )
+            self._dec_edit.setPlainText("")
+            self._task_edit.setPlainText("")
+            self._gen_btn.setVisible(True)
             return
         try:
             from core.storage.database import get_db
@@ -309,6 +373,40 @@ class MeetingDetailDialog(QDialog):
                 db.close()
         except Exception as exc:
             log.debug("poll_db error: %s", exc)
+
+    def _generate_summary(self) -> None:
+        """Trigger on-demand summarization for this meeting."""
+        if not self._llm_client or not self._transcript.strip():
+            self._sum_edit.setPlainText(
+                "Cannot generate summary: no LLM provider configured or transcript is empty.\n"
+                "Configure a provider in Settings \u2192 LLM."
+            )
+            return
+        self._gen_btn.setEnabled(False)
+        self._gen_btn.setText("\u23f3  Generating...")
+        self._sum_edit.setPlainText("\u23f3  Generating summary\u2026 this may take 15\u201360 seconds.")
+        self._dec_edit.setPlainText("\u23f3  Pending\u2026")
+        self._task_edit.setPlainText("\u23f3  Pending\u2026")
+
+        self._summary_gen_worker = _SummaryGenWorker(
+            self._transcript, self._language, self._llm_client,
+            self._llm_model, self._session_id, parent=self,
+        )
+        self._summary_gen_worker.done.connect(self._on_gen_done)
+        self._summary_gen_worker.error.connect(self._on_gen_error)
+        self._summary_gen_worker.start()
+
+    @pyqtSlot(str, str)
+    def _on_gen_done(self, summary: str, action_items: str) -> None:
+        self._apply_summary(summary, action_items)
+        self._gen_btn.setText("\U0001f504  Re-generate Summary")
+        self._gen_btn.setEnabled(True)
+
+    @pyqtSlot(str)
+    def _on_gen_error(self, error: str) -> None:
+        self._sum_edit.setPlainText(f"Summary generation failed:\n{error}")
+        self._gen_btn.setText("\U0001f504  Retry")
+        self._gen_btn.setEnabled(True)
 
     def _apply_summary(self, summary_text: str, action_items_raw: str) -> None:
         """Populate the three summary sections (and participants) from a stored summary."""
